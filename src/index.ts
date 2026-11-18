@@ -2,6 +2,7 @@ import "dotenv/config";
 import express, { Request, Response } from "express";
 import cors from "cors";
 import { connectDB } from "./config/db";
+import meRoutes from "./routes/me.routes";
 
 const app = express();
 const port = process.env.PORT || 5000;
@@ -21,6 +22,8 @@ app.get("/", (_req: Request, res: Response) => {
 app.get("/api/health", (_req: Request, res: Response) => {
   res.json({ status: "ok", time: new Date().toISOString() });
 });
+
+app.use("/api", meRoutes);
 
 async function start() {
   try {
