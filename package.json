@@ -1,10 +1,12 @@
 {
   "name": "pizzahub-server",
   "version": "1.0.0",
-  "description": "",
-  "main": "index.js",
+  "description": "PizzaHub server: Express.js + MongoDB REST API with JWT auth, Stripe webhooks, and role-based access (customer, vendor, admin).",
+  "main": "dist/index.js",
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "dev": "tsx watch src/index.ts",
+    "build": "tsc",
+    "start": "node dist/index.js"
   },
   "keywords": [],
   "author": "",
