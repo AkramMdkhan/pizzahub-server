@@ -64,6 +64,16 @@ function validateItem(body: any, partial = false) {
     }
   }
 
+  // Location is required when creating an item
+  if (!partial || body.location !== undefined) {
+    const v = typeof body.location === "string" ? body.location.trim() : "";
+    if (v.length < 2 || v.length > 100) {
+      errors.push("Location must be 2-100 characters");
+    } else {
+      data.location = v;
+    }
+  }
+
   if (body.ingredients !== undefined) {
     if (
       Array.isArray(body.ingredients) &&
@@ -84,7 +94,8 @@ function validateItem(body: any, partial = false) {
   return { errors, data };
 }
 
-// GET /api/menu-items  (public: search, category filter, price sort, pagination)
+// GET /api/menu-items  (public: only APPROVED items;
+// search, category filter, price sort, pagination)
 router.get("/", async (req, res: Response) => {
   try {
     const search = String(req.query.search || "").trim();
@@ -96,7 +107,7 @@ router.get("/", async (req, res: Response) => {
       Math.max(1, parseInt(String(req.query.limit)) || 9)
     );
 
-    const filter: Record<string, unknown> = {};
+    const filter: Record<string, unknown> = { status: "approved" };
 
     if (search) {
       const regex = new RegExp(escapeRegex(search), "i");
@@ -135,7 +146,7 @@ router.get("/", async (req, res: Response) => {
   }
 });
 
-// GET /api/menu-items/mine  (vendor: only my items)
+// GET /api/menu-items/mine  (vendor: only my items, any status)
 // Must stay above "/:id" so "mine" is not treated as an id
 router.get(
   "/mine",
@@ -156,7 +167,38 @@ router.get(
   }
 );
 
-// GET /api/menu-items/:id  (public)
+// GET /api/menu-items/mine/:id  (vendor: one of my own items, any status)
+// Used by the Edit Menu Item page, because pending items are not public
+router.get(
+  "/mine/:id",
+  verifyToken,
+  requireRole("vendor"),
+  async (req: AuthRequest, res: Response) => {
+    try {
+      const id = String(req.params.id);
+      if (!ObjectId.isValid(id)) {
+        return res.status(400).json({ message: "Invalid item id" });
+      }
+
+      const item = await menuItems().findOne({ _id: new ObjectId(id) });
+      if (!item) {
+        return res.status(404).json({ message: "Menu item not found" });
+      }
+      if (item.vendorId !== req.user!.id) {
+        return res
+          .status(403)
+          .json({ message: "You can only view your own items" });
+      }
+
+      res.json(item);
+    } catch (error) {
+      console.error(error);
+      res.status(500).json({ message: "Failed to fetch menu item" });
+    }
+  }
+);
+
+// GET /api/menu-items/:id  (public: only APPROVED items)
 router.get("/:id", async (req, res: Response) => {
   try {
     const id = String(req.params.id);
@@ -164,7 +206,10 @@ router.get("/:id", async (req, res: Response) => {
       return res.status(400).json({ message: "Invalid item id" });
     }
 
-    const item = await menuItems().findOne({ _id: new ObjectId(id) });
+    const item = await menuItems().findOne({
+      _id: new ObjectId(id),
+      status: "approved",
+    });
     if (!item) {
       return res.status(404).json({ message: "Menu item not found" });
     }
@@ -176,21 +221,51 @@ router.get("/:id", async (req, res: Response) => {
   }
 });
 
-// POST /api/menu-items  (vendor only)
+
+// POST /api/menu-items  (vendor only; new items start as "pending")
 router.post(
   "/",
   verifyToken,
   requireRole("vendor"),
   async (req: AuthRequest, res: Response) => {
     try {
+      // 1. Validate input
       const { errors, data } = validateItem(req.body || {});
       if (errors.length) {
         return res.status(400).json({ message: errors[0], errors });
       }
 
+      // 2. Check vendor's subscription plan
+      const users = getDB().collection("user");
+      const vendor = await users.findOne({ 
+        $or: [
+          ...(ObjectId.isValid(req.user!.id) ? [{ _id: new ObjectId(req.user!.id) }] : []),
+          { id: req.user!.id }
+        ]
+      });
+
+      const plan = vendor?.subscriptionPlan || "free";
+
+      // 3. Enforce 3-item limit for Free plan
+      if (plan === "free") {
+        // Count all items that are NOT rejected
+        const activeCount = await menuItems().countDocuments({
+          vendorId: req.user!.id,
+          status: { $ne: "rejected" } 
+        });
+
+        if (activeCount >= 3) {
+          return res.status(403).json({ 
+            message: "Free plan limit reached. Please upgrade to Premium to add more items." 
+          });
+        }
+      }
+
+      // 4. Insert item
       const now = new Date();
       const doc = {
         ...data,
+        status: "pending",
         vendorId: req.user!.id,
         vendorEmail: req.user!.email,
         createdAt: now,
@@ -206,7 +281,7 @@ router.post(
   }
 );
 
-// PATCH /api/menu-items/:id  (owner vendor only)
+// PATCH /api/menu-items/:id  (owner vendor only; status is never editable here)
 router.patch(
   "/:id",
   verifyToken,
