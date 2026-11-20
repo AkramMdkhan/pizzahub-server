@@ -5,6 +5,7 @@ import { connectDB } from "./config/db";
 import meRoutes from "./routes/me.routes";
 import menuItemsRoutes from "./routes/menuItems.routes";
 import ordersRoutes from "./routes/orders.routes";
+import adminRoutes from "./routes/admin.routes";
 
 const app = express();
 const port = process.env.PORT || 5000;
@@ -28,6 +29,7 @@ app.get("/api/health", (_req: Request, res: Response) => {
 app.use("/api", meRoutes);
 app.use("/api/menu-items", menuItemsRoutes);
 app.use("/api/orders", ordersRoutes);
+app.use("/api/admin", adminRoutes);
 
 async function start() {
   try {
