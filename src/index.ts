@@ -1,5 +1,5 @@
 import "dotenv/config";
-import express, { Request, Response } from "express";
+import express, { Request, Response, NextFunction } from "express";
 import cors from "cors";
 import { connectDB } from "./config/db";
 import meRoutes from "./routes/me.routes";
@@ -10,7 +10,6 @@ import stripeRoutes from "./routes/stripe.routes";
 import { handleStripeWebhook } from "./routes/stripe.webhook";
 
 const app = express();
-const port = process.env.PORT || 5000;
 
 app.use(
   cors({
@@ -19,7 +18,7 @@ app.use(
   })
 );
 
-// Stripe webhook: must come BEFORE express.json() because it needs the raw body
+// Stripe webhook: must come BEFORE express.json()
 app.post(
   "/api/stripe/webhook",
   express.raw({ type: "application/json" }),
@@ -27,6 +26,30 @@ app.post(
 );
 
 app.use(express.json());
+
+// --- DATABASE CONNECTION LOGIC ---
+let isConnected = false;
+
+async function connectToDatabase() {
+  if (isConnected) return;
+  try {
+    await connectDB();
+    isConnected = true;
+    console.log("MongoDB connected successfully.");
+  } catch (error) {
+    console.error("Failed to connect to MongoDB:", error);
+  }
+}
+
+// Middleware for Vercel (connects on request if cold start)
+app.use(async (_req: Request, res: Response, next: NextFunction) => {
+  await connectToDatabase();
+  if (!isConnected) {
+    return res.status(500).json({ message: "Database connection failed" });
+  }
+  next();
+});
+// ---------------------------------
 
 app.get("/", (_req: Request, res: Response) => {
   res.json({ message: "PizzaHub API is running" });
@@ -42,16 +65,17 @@ app.use("/api/orders", ordersRoutes);
 app.use("/api/admin", adminRoutes);
 app.use("/api/stripe", stripeRoutes);
 
-async function start() {
-  try {
-    await connectDB();
+// Export the app for Vercel
+export default app;
+
+// Keep app.listen and immediate DB connection for local development ONLY
+if (process.env.NODE_ENV !== "production") {
+  const port = process.env.PORT || 5000;
+  
+  // Connect to DB immediately on local start
+  connectToDatabase().then(() => {
     app.listen(port, () => {
       console.log(`Server running on http://localhost:${port}`);
     });
-  } catch (error) {
-    console.error("Failed to start server:", error);
-    process.exit(1);
-  }
+  });
 }
-
-start();

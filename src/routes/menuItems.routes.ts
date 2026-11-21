@@ -1,6 +1,7 @@
 import { Router, Response } from "express";
 import { ObjectId } from "mongodb";
 import { getDB } from "../config/db";
+import { FREE_PLAN_MAX_ACTIVE_ITEMS } from "../config/stripe";
 import { verifyToken, requireRole } from "../middleware/auth";
 import { AuthRequest } from "../types";
 
@@ -12,6 +13,25 @@ function menuItems() {
 
 function escapeRegex(text: string) {
   return text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+// Premium counts only while the paid period has not ended
+async function vendorHasPremium(vendorId: string) {
+  const users = getDB().collection("user"); // Better Auth collection
+  const user = await users.findOne({
+    $or: [
+      ...(ObjectId.isValid(vendorId) ? [{ _id: new ObjectId(vendorId) }] : []),
+      { id: vendorId },
+    ],
+  });
+  if (!user || user.subscriptionPlan !== "premium") return false;
+
+  const raw = user.subscriptionExpiresAt;
+  if (!(raw instanceof Date || typeof raw === "string" || typeof raw === "number")) {
+    return false;
+  }
+  const expiresAt = new Date(raw);
+  return !Number.isNaN(expiresAt.getTime()) && expiresAt.getTime() > Date.now();
 }
 
 function validateItem(body: any, partial = false) {
@@ -69,7 +89,7 @@ function validateItem(body: any, partial = false) {
   return { errors, data };
 }
 
-// Helper to create the $lookup pipeline
+// Adds isPremiumVendor to each item: true only while the vendor's paid period is active
 const vendorLookupPipeline = [
   {
     $lookup: {
@@ -81,31 +101,40 @@ const vendorLookupPipeline = [
             $expr: {
               $or: [
                 { $eq: [{ $toString: "$_id" }, "$$vendorIdStr"] },
-                { $eq: ["$id", "$$vendorIdStr"] }
-              ]
-            }
-          }
+                { $eq: ["$id", "$$vendorIdStr"] },
+              ],
+            },
+          },
         },
-        { $project: { subscriptionPlan: 1 } }
+        { $project: { subscriptionPlan: 1, subscriptionExpiresAt: 1 } },
       ],
-      as: "vendorDetails"
-    }
+      as: "vendorDetails",
+    },
   },
   {
     $addFields: {
       isPremiumVendor: {
-        $eq: [{ $arrayElemAt: ["$vendorDetails.subscriptionPlan", 0] }, "premium"]
-      }
-    }
+        $let: {
+          vars: { vendor: { $arrayElemAt: ["$vendorDetails", 0] } },
+          in: {
+            $and: [
+              { $eq: ["$$vendor.subscriptionPlan", "premium"] },
+              { $gt: ["$$vendor.subscriptionExpiresAt", "$$NOW"] },
+            ],
+          },
+        },
+      },
+    },
   },
-  { $project: { vendorDetails: 0 } }
+  { $project: { vendorDetails: 0 } },
 ];
 
-// GET /api/menu-items  (public: only APPROVED items; search, category, sort, pagination)
+// GET /api/menu-items  (public: only APPROVED items; search, category, location, sort, pagination)
 router.get("/", async (req, res: Response) => {
   try {
     const search = String(req.query.search || "").trim();
     const category = String(req.query.category || "").trim();
+    const location = String(req.query.location || "").trim(); // Added location
     const sort = String(req.query.sort || "newest");
     const page = Math.max(1, parseInt(String(req.query.page)) || 1);
     const limit = Math.min(50, Math.max(1, parseInt(String(req.query.limit)) || 9));
@@ -119,6 +148,9 @@ router.get("/", async (req, res: Response) => {
     if (category && category !== "all") {
       filter.category = category;
     }
+    if (location && location !== "all") {
+      filter.location = location; // Exact match for location dropdown
+    }
 
     const sortMap: Record<string, Record<string, 1 | -1>> = {
       "price-asc": { price: 1, _id: 1 },
@@ -131,7 +163,7 @@ router.get("/", async (req, res: Response) => {
       { $sort: sortMap[sort] || sortMap.newest },
       { $skip: (page - 1) * limit },
       { $limit: limit },
-      ...vendorLookupPipeline
+      ...vendorLookupPipeline,
     ];
 
     const [items, total] = await Promise.all([
@@ -146,17 +178,30 @@ router.get("/", async (req, res: Response) => {
   }
 });
 
-// GET /api/menu-items/mine (vendor: only my items)
+// GET /api/menu-items/locations (public: fetch unique locations for the filter)
+// Must be placed BEFORE /:id
+router.get("/locations", async (_req, res: Response) => {
+  try {
+    const locations = await menuItems().distinct("location", { status: "approved" });
+    res.json(locations.filter(Boolean).sort());
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ message: "Failed to fetch locations" });
+  }
+});
+
+// GET /api/menu-items/mine (vendor: only my items, any status)
 router.get("/mine", verifyToken, requireRole("vendor"), async (req: AuthRequest, res: Response) => {
   try {
     const items = await menuItems().find({ vendorId: req.user!.id }).sort({ createdAt: -1 }).toArray();
     res.json({ items, total: items.length });
   } catch (error) {
+    console.error(error);
     res.status(500).json({ message: "Failed to fetch your menu items" });
   }
 });
 
-// GET /api/menu-items/mine/:id (vendor: one of my own items)
+// GET /api/menu-items/mine/:id (vendor: one of my own items, any status)
 router.get("/mine/:id", verifyToken, requireRole("vendor"), async (req: AuthRequest, res: Response) => {
   try {
     const id = String(req.params.id);
@@ -168,11 +213,12 @@ router.get("/mine/:id", verifyToken, requireRole("vendor"), async (req: AuthRequ
 
     res.json(item);
   } catch (error) {
+    console.error(error);
     res.status(500).json({ message: "Failed to fetch menu item" });
   }
 });
 
-// GET /api/menu-items/:id  (public: only APPROVED items, WITH Premium lookup)
+// GET /api/menu-items/:id  (public: only APPROVED items, with the Premium flag)
 router.get("/:id", async (req, res: Response) => {
   try {
     const id = String(req.params.id);
@@ -180,14 +226,15 @@ router.get("/:id", async (req, res: Response) => {
 
     const pipeline: any[] = [
       { $match: { _id: new ObjectId(id), status: "approved" } },
-      ...vendorLookupPipeline
+      ...vendorLookupPipeline,
     ];
 
     const items = await menuItems().aggregate(pipeline).toArray();
     if (items.length === 0) return res.status(404).json({ message: "Menu item not found" });
 
-    res.json(items[0]); // Return the single object
+    res.json(items[0]);
   } catch (error) {
+    console.error(error);
     res.status(500).json({ message: "Failed to fetch menu item" });
   }
 });
@@ -198,22 +245,16 @@ router.post("/", verifyToken, requireRole("vendor"), async (req: AuthRequest, re
     const { errors, data } = validateItem(req.body || {});
     if (errors.length) return res.status(400).json({ message: errors[0], errors });
 
-    // 3-item limit check
-    const users = getDB().collection("user");
-    const vendor = await users.findOne({ 
-      $or: [
-        ...(ObjectId.isValid(req.user!.id) ? [{ _id: new ObjectId(req.user!.id) }] : []),
-        { id: req.user!.id }
-      ]
-    });
-
-    if (vendor?.subscriptionPlan !== "premium") {
+    if (!(await vendorHasPremium(req.user!.id))) {
       const activeCount = await menuItems().countDocuments({
         vendorId: req.user!.id,
-        status: { $ne: "rejected" } 
+        status: { $in: ["pending", "approved"] },
       });
-      if (activeCount >= 3) {
-        return res.status(403).json({ message: "Free plan limit reached. Please upgrade to Premium to add more items." });
+      if (activeCount >= FREE_PLAN_MAX_ACTIVE_ITEMS) {
+        return res.status(403).json({
+          code: "FREE_PLAN_LIMIT",
+          message: `The Free plan allows up to ${FREE_PLAN_MAX_ACTIVE_ITEMS} active menu items. Upgrade to Premium to add more.`,
+        });
       }
     }
 
@@ -230,11 +271,12 @@ router.post("/", verifyToken, requireRole("vendor"), async (req: AuthRequest, re
     const result = await menuItems().insertOne(doc);
     res.status(201).json({ _id: result.insertedId, ...doc });
   } catch (error) {
+    console.error(error);
     res.status(500).json({ message: "Failed to create menu item" });
   }
 });
 
-// PATCH /api/menu-items/:id  (owner vendor only)
+// PATCH /api/menu-items/:id  (owner vendor only; status is never editable here)
 router.patch("/:id", verifyToken, requireRole("vendor"), async (req: AuthRequest, res: Response) => {
   try {
     const id = String(req.params.id);
@@ -252,6 +294,7 @@ router.patch("/:id", verifyToken, requireRole("vendor"), async (req: AuthRequest
     const updated = await menuItems().findOne({ _id: existing._id });
     res.json(updated);
   } catch (error) {
+    console.error(error);
     res.status(500).json({ message: "Failed to update menu item" });
   }
 });
@@ -273,6 +316,7 @@ router.delete("/:id", verifyToken, requireRole("vendor", "admin"), async (req: A
     await menuItems().deleteOne({ _id: existing._id });
     res.json({ message: "Menu item deleted" });
   } catch (error) {
+    console.error(error);
     res.status(500).json({ message: "Failed to delete menu item" });
   }
 });
