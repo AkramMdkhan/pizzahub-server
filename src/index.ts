@@ -6,6 +6,8 @@ import meRoutes from "./routes/me.routes";
 import menuItemsRoutes from "./routes/menuItems.routes";
 import ordersRoutes from "./routes/orders.routes";
 import adminRoutes from "./routes/admin.routes";
+import stripeRoutes from "./routes/stripe.routes";
+import { handleStripeWebhook } from "./routes/stripe.webhook";
 
 const app = express();
 const port = process.env.PORT || 5000;
@@ -16,6 +18,14 @@ app.use(
     credentials: true,
   })
 );
+
+// Stripe webhook: must come BEFORE express.json() because it needs the raw body
+app.post(
+  "/api/stripe/webhook",
+  express.raw({ type: "application/json" }),
+  handleStripeWebhook
+);
+
 app.use(express.json());
 
 app.get("/", (_req: Request, res: Response) => {
@@ -30,6 +40,7 @@ app.use("/api", meRoutes);
 app.use("/api/menu-items", menuItemsRoutes);
 app.use("/api/orders", ordersRoutes);
 app.use("/api/admin", adminRoutes);
+app.use("/api/stripe", stripeRoutes);
 
 async function start() {
   try {
