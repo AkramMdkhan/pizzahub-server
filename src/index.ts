@@ -11,12 +11,18 @@ import { handleStripeWebhook } from "./routes/stripe.webhook";
 
 const app = express();
 
+// 1. CORS configuration
 app.use(
   cors({
     origin: process.env.CLIENT_URL || "http://localhost:3000",
     credentials: true,
+    methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
+    allowedHeaders: ["Content-Type", "Authorization"],
   })
 );
+
+// 2. Handle Preflight requests explicitly (critical for Vercel)
+app.options("*", cors());
 
 // --- DATABASE CONNECTION LOGIC ---
 let isConnected = false;
@@ -31,8 +37,6 @@ async function connectToDatabase() {
   }
 }
 
-// Runs before every route, including the Stripe webhook, so a cold start
-// on Vercel always has a database connection before any handler runs.
 app.use(async (_req: Request, res: Response, next: NextFunction) => {
   await connectToDatabase();
   if (!isConnected) {
@@ -42,13 +46,14 @@ app.use(async (_req: Request, res: Response, next: NextFunction) => {
 });
 // ---------------------------------
 
-// Stripe webhook: must come BEFORE express.json() because it needs the raw body
+// 3. Stripe webhook MUST be parsed with raw body
 app.post(
   "/api/stripe/webhook",
   express.raw({ type: "application/json" }),
   handleStripeWebhook
 );
 
+// 4. JSON body parser (moved below the webhook)
 app.use(express.json());
 
 app.get("/", (_req: Request, res: Response) => {
