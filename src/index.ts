@@ -22,7 +22,8 @@ app.use(
 );
 
 // 2. Handle Preflight requests explicitly (critical for Vercel)
-app.options("*", cors());
+app.options(/.*/, cors());
+
 
 // --- DATABASE CONNECTION LOGIC ---
 let isConnected = false;
