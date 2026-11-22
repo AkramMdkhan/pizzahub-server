@@ -18,15 +18,6 @@ app.use(
   })
 );
 
-// Stripe webhook: must come BEFORE express.json()
-app.post(
-  "/api/stripe/webhook",
-  express.raw({ type: "application/json" }),
-  handleStripeWebhook
-);
-
-app.use(express.json());
-
 // --- DATABASE CONNECTION LOGIC ---
 let isConnected = false;
 
@@ -35,13 +26,13 @@ async function connectToDatabase() {
   try {
     await connectDB();
     isConnected = true;
-    console.log("MongoDB connected successfully.");
   } catch (error) {
     console.error("Failed to connect to MongoDB:", error);
   }
 }
 
-// Middleware for Vercel (connects on request if cold start)
+// Runs before every route, including the Stripe webhook, so a cold start
+// on Vercel always has a database connection before any handler runs.
 app.use(async (_req: Request, res: Response, next: NextFunction) => {
   await connectToDatabase();
   if (!isConnected) {
@@ -50,6 +41,15 @@ app.use(async (_req: Request, res: Response, next: NextFunction) => {
   next();
 });
 // ---------------------------------
+
+// Stripe webhook: must come BEFORE express.json() because it needs the raw body
+app.post(
+  "/api/stripe/webhook",
+  express.raw({ type: "application/json" }),
+  handleStripeWebhook
+);
+
+app.use(express.json());
 
 app.get("/", (_req: Request, res: Response) => {
   res.json({ message: "PizzaHub API is running" });
@@ -68,12 +68,15 @@ app.use("/api/stripe", stripeRoutes);
 // Export the app for Vercel
 export default app;
 
-// Keep app.listen and immediate DB connection for local development ONLY
+// app.listen runs for local development ONLY
 if (process.env.NODE_ENV !== "production") {
   const port = process.env.PORT || 5000;
-  
-  // Connect to DB immediately on local start
+
   connectToDatabase().then(() => {
+    if (!isConnected) {
+      console.error("Server not started: could not connect to MongoDB.");
+      process.exit(1);
+    }
     app.listen(port, () => {
       console.log(`Server running on http://localhost:${port}`);
     });
