@@ -11,7 +11,7 @@ import { handleStripeWebhook } from "./routes/stripe.webhook";
 
 const app = express();
 
-// 1. CORS configuration
+// CORS (also answers preflight requests for the client address)
 app.use(
   cors({
     origin: process.env.CLIENT_URL || "http://localhost:3000",
@@ -21,40 +21,34 @@ app.use(
   })
 );
 
-// 2. Handle Preflight requests explicitly (critical for Vercel)
-app.options(/.*/, cors());
-
-
 // --- DATABASE CONNECTION LOGIC ---
-let isConnected = false;
-
+// connectDB() is cheap while the connection is healthy and reconnects when it is not
 async function connectToDatabase() {
-  if (isConnected) return;
   try {
     await connectDB();
-    isConnected = true;
+    return true;
   } catch (error) {
     console.error("Failed to connect to MongoDB:", error);
+    return false;
   }
 }
 
+// Runs before every route, including the Stripe webhook
 app.use(async (_req: Request, res: Response, next: NextFunction) => {
-  await connectToDatabase();
-  if (!isConnected) {
+  if (!(await connectToDatabase())) {
     return res.status(500).json({ message: "Database connection failed" });
   }
   next();
 });
 // ---------------------------------
 
-// 3. Stripe webhook MUST be parsed with raw body
+// Stripe webhook: must be parsed with the raw body, before express.json()
 app.post(
   "/api/stripe/webhook",
   express.raw({ type: "application/json" }),
   handleStripeWebhook
 );
 
-// 4. JSON body parser (moved below the webhook)
 app.use(express.json());
 
 app.get("/", (_req: Request, res: Response) => {
@@ -78,8 +72,8 @@ export default app;
 if (process.env.NODE_ENV !== "production") {
   const port = process.env.PORT || 5000;
 
-  connectToDatabase().then(() => {
-    if (!isConnected) {
+  connectToDatabase().then((connected) => {
+    if (!connected) {
       console.error("Server not started: could not connect to MongoDB.");
       process.exit(1);
     }
