@@ -1,5 +1,4 @@
 import { Db, MongoClient } from "mongodb";
-import { attachDatabasePool } from "@vercel/functions";
 
 let client: MongoClient | null = null;
 let db: Db | null = null;
@@ -9,55 +8,56 @@ let lastCheck = 0;
 // A healthy connection is re-checked at most this often
 const CHECK_INTERVAL_MS = 15_000;
 
-function createClient() {
+function createClient(): MongoClient {
   const uri = process.env.MONGODB_URI;
   if (!uri) {
-    throw new Error("MONGODB_URI is missing in .env");
+    throw new Error("MONGODB_URI is missing in environment variables");
   }
 
-  const newClient = new MongoClient(uri, {
+  return new MongoClient(uri, {
     maxPoolSize: 10,
     serverSelectionTimeoutMS: 10000,
   });
-
-  // On Vercel, let the platform close idle connections before a function is suspended
-  if (process.env.VERCEL) {
-    attachDatabasePool(newClient);
-  }
-
-  return newClient;
 }
 
 async function open(): Promise<Db> {
-  client = createClient();
-  await client.connect();
+  const newClient = createClient();
+  await newClient.connect();
 
-  const database = client.db(process.env.DB_NAME || "pizzahub");
+  const database = newClient.db(process.env.DB_NAME || "pizzahub");
   await database.command({ ping: 1 });
 
+  client = newClient;
   db = database;
   lastCheck = Date.now();
   console.log("MongoDB connected");
   return database;
 }
 
-async function reset() {
-  const old = client;
+async function reset(): Promise<void> {
+  const oldClient = client;
+  const oldDb = db;
   client = null;
   db = null;
-  if (old) {
+  lastCheck = 0;
+
+  if (oldClient) {
     try {
-      await old.close();
+      await oldClient.close();
     } catch {
       // The connection may already be closed
     }
+  } else if (oldDb) {
+    // Fallback if needed
   }
 }
 
 // Cheap when the connection is healthy. If it is dead, it reconnects.
 export async function connectDB(): Promise<Db> {
   // Verified recently: reuse it
-  if (db && Date.now() - lastCheck < CHECK_INTERVAL_MS) return db;
+  if (db && Date.now() - lastCheck < CHECK_INTERVAL_MS) {
+    return db;
+  }
 
   // Older connection: check that it is still alive
   if (db) {
@@ -82,6 +82,7 @@ export async function connectDB(): Promise<Db> {
         connecting = null;
       });
   }
+
   return connecting;
 }
 
