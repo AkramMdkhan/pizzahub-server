@@ -22,7 +22,6 @@ app.use(
 );
 
 // --- DATABASE CONNECTION LOGIC ---
-// connectDB() is cheap while the connection is healthy and reconnects when it is not
 async function connectToDatabase() {
   try {
     await connectDB();
@@ -65,20 +64,15 @@ app.use("/api/orders", ordersRoutes);
 app.use("/api/admin", adminRoutes);
 app.use("/api/stripe", stripeRoutes);
 
-// Export the app for Vercel
-export default app;
+// Render / Local Development start
+const port = process.env.PORT || 5000;
 
-// app.listen runs for local development ONLY
-if (process.env.NODE_ENV !== "production") {
-  const port = process.env.PORT || 5000;
-
-  connectToDatabase().then((connected) => {
-    if (!connected) {
-      console.error("Server not started: could not connect to MongoDB.");
-      process.exit(1);
-    }
-    app.listen(port, () => {
-      console.log(`Server running on http://localhost:${port}`);
-    });
+connectToDatabase().then((connected) => {
+  if (!connected) {
+    console.error("Server not started: could not connect to MongoDB.");
+    process.exit(1);
+  }
+  app.listen(port, () => {
+    console.log(`Server running on port ${port}`);
   });
-}
+});

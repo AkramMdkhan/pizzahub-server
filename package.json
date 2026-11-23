@@ -1,13 +1,12 @@
 {
   "name": "pizzahub-server",
   "version": "1.0.0",
-  "description": "PizzaHub server: Express.js + MongoDB REST API with JWT auth, Stripe webhooks, and role-based access (customer, vendor, admin).",
+  "description": "PizzaHub server: Express.js + MongoDB REST API with JWT auth, Stripe webhooks, and role-based access.",
   "main": "dist/index.js",
   "scripts": {
     "dev": "tsx watch src/index.ts",
     "build": "tsc",
-    "start": "node dist/index.js",
-    "vercel-build": "tsc"
+    "start": "node dist/index.js"
   },
   "keywords": [],
   "author": "",
@@ -15,7 +14,6 @@
   "type": "commonjs",
   "dependencies": {
     "@types/node": "^26.6.6",
-    "@vercel/functions": "^3.11.3",
     "cors": "^2.8.6",
     "dotenv": "^18.0.10",
     "express": "^5.3.0",
