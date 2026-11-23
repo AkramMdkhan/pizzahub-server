@@ -12,11 +12,9 @@ The **PizzaHub Server** is the RESTful backend powering **PizzaHub**, a role-bas
 
 ## Live Links & Repositories
 
-- **Live Client Website:** `https://pizzahub-client-beige.vercel.app`
-- **Live Server API:** `https://your-pizzahub-server-url.com`
-- **Server Repository:** `https://github.com/AkramMdkhan/pizzahub-server`
-- **Client Repository:** `https://github.com/AkramMdkhan/pizzahub-client`
-
+- **Live Client Website:** [PizzaHub Live](https://pizzahub-client-beige.vercel.app)
+- **Server Repository:** [AkramMdkhan/pizzahub-server](https://github.com/AkramMdkhan/pizzahub-server)
+- **Client Repository:** [AkramMdkhan/pizzahub-client](https://github.com/AkramMdkhan/pizzahub-client)
 ---
 
 ## Core Architecture & Features
