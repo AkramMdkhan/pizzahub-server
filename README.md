@@ -1,166 +1,200 @@
-# PizzaHub — Pizza Ordering & Delivery Platform (Server)
+<div align="center">
 
-[![Node.js](https://img.shields.io/badge/Node.js-20.x-339933?logo=node.js&logoColor=white)](https://nodejs.org/)
-[![Express.js](https://img.shields.io/badge/Express.js-REST%20API-000000?logo=express&logoColor=white)](https://expressjs.com/)
-[![MongoDB](https://img.shields.io/badge/MongoDB-Atlas-47A248?logo=mongodb&logoColor=white)](https://www.mongodb.com/)
-[![Better Auth](https://img.shields.io/badge/Auth-Better%20Auth%20%2B%20JWT-orange)](https://www.better-auth.com/)
-[![Stripe](https://img.shields.io/badge/Payments-Stripe%20Checkout%20%26%20Webhooks-635BFF?logo=stripe&logoColor=white)](https://stripe.com/)
+# 🍕 PizzaHub Server
 
-The **PizzaHub Server** is the RESTful backend powering **PizzaHub**, a role-based pizza ordering and delivery platform. Built with **Express.js**, **MongoDB**, **Better Auth**, **JWT role-based middleware**, and **Stripe Checkout + Webhooks**, it enforces business rules, role authorization, resource ownership, and verified vendor subscription billing.
+**The REST API behind PizzaHub, a role-based pizza ordering and delivery platform**
 
----
+An Express and MongoDB backend that secures every request with JWT, enforces customer, vendor and admin permissions, and handles Stripe Premium subscriptions through verified webhooks.
 
-## Live Links & Repositories
+<p>
+  <img src="https://img.shields.io/badge/Node.js-339933?style=for-the-badge&logo=nodedotjs&logoColor=white" />
+  <img src="https://img.shields.io/badge/Express-000000?style=for-the-badge&logo=express&logoColor=white" />
+  <img src="https://img.shields.io/badge/TypeScript-3178C6?style=for-the-badge&logo=typescript&logoColor=white" />
+  <img src="https://img.shields.io/badge/MongoDB-47A248?style=for-the-badge&logo=mongodb&logoColor=white" />
+  <img src="https://img.shields.io/badge/Stripe-635BFF?style=for-the-badge&logo=stripe&logoColor=white" />
+  <img src="https://img.shields.io/badge/Render-46E3B7?style=for-the-badge&logo=render&logoColor=black" />
+</p>
 
-- **Live Client Website:** [PizzaHub Live](https://pizzahub-client-beige.vercel.app)
-- **Server Repository:** [AkramMdkhan/pizzahub-server](https://github.com/AkramMdkhan/pizzahub-server)
-- **Client Repository:** [AkramMdkhan/pizzahub-client](https://github.com/AkramMdkhan/pizzahub-client)
----
+ [Live Client](https://pizzahub-client-beige.vercel.app) · [Client Repository](https://github.com/AkramMdkhan/pizzahub-client) · [Server Repository](https://github.com/AkramMdkhan/pizzahub-server)
 
-## Core Architecture & Features
-
-### Authentication & Role-Based Security
-- **Better Auth + MongoDB Adapter:** Handles credential sign-up/sign-in, password validation, Google OAuth, and session/JWT issuance.
-- **Public Registration Guard:** Public sign-up allows only `customer` or `vendor` roles; `admin` privileges cannot be self-assigned via registration or profile updates.
-- **JWT & Role Verification Middleware:**
-  - `verifyToken`: Validates the incoming JWT/session token on protected routes and returns `401 Unauthorized` for missing, invalid, or expired tokens.
-  - `checkBlocked`: Rejects blocked users (`isBlocked: true`) with `403 Forbidden` before any protected action executes.
-  - `requireRole(...roles)`: Enforces server-side role access (`customer`, `vendor`, `admin`) and returns `403 Forbidden` on unauthorized role attempts.
-  - **Ownership Enforcement:** Every update, status change, or delete operation checks resource ownership (`vendorId` or `customerId`) against the authenticated user ID extracted from the verified token — never trusting user IDs or roles sent in the request body.
-
-### Business Rules & Workflows
-- **Menu Item Moderation & Plan Limits:**
-  - Vendors submit menu items (`pending` status by default) for Admin review.
-  - Only `approved` and active items are returned to public catalog endpoints; `rejected` or `inactive` items remain hidden from customers.
-  - **Subscription Limit:** Vendors on the `free` plan are restricted to a maximum of **3 active menu items**; `premium` vendors can publish **unlimited** active items.
-- **Order Lifecycle Management:**
-  - Customers submit orders (`pending` status) with delivery date, delivery address, and optional instructions.
-  - Prevents vendors from ordering their own items, prevents admins from placing customer orders, and blocks duplicate active orders for the same item and delivery date.
-  - **Customers** can cancel only their own `pending` orders.
-  - **Vendors** can `accept` or `reject` incoming `pending` orders for their own items once.
-- **Stripe Vendor Subscriptions & Webhooks:**
-  - Vendors initiate a **Stripe Checkout Session** to upgrade to `premium`.
-  - Premium status is activated **exclusively** after the backend verifies Stripe's `checkout.session.completed` webhook event signature (`STRIPE_WEBHOOK_SECRET`), records an immutable payment entry in `transactions`, and updates the vendor's `subscriptionPlan` and `subscriptionExpiresAt` fields.
-- **Admin Governance:**
-  - Manage registered users (search, filter by role, block/unblock).
-  - Review submitted menu items (`approve`, `reject`, toggle status, or delete).
-  - Inspect platform `transactions` in a strictly read-only audit endpoint (payment records cannot be altered by admins).
+</div>
 
 ---
 
-## MongoDB Database Schema
+## 📖 About the Project
 
-Beyond Better Auth's internal auth collections, the backend uses four structured collections:
+PizzaHub connects customers who want to order pizza with local vendors who run their menus, and admins who keep the platform trustworthy. This repository is the **server** that powers it.
 
-| Collection | Key Fields & References |
-| :--- | :--- |
-| **`users`** *(Better Auth)* | `name`, `email`, `image`, `role` (`vendor` \| `customer` \| `admin`), `isBlocked`, `businessName` *(vendor)*, `subscriptionPlan` (`free` \| `premium`), `subscriptionExpiresAt` |
-| **`menuItems`** | `vendorId` *(ref: `users`)*, `itemName`, `category`, `description`, `price`, `location`, `images`, `status` (`pending` \| `approved` \| `rejected` \| `inactive`), `createdAt` |
-| **`orders`** | `itemId` *(ref: `menuItems`)*, `vendorId` *(ref: `users`)*, `customerId` *(ref: `users`)*, `deliveryDate`, `deliveryAddress`, `message`, `status` (`pending` \| `accepted` \| `rejected` \| `cancelled`), `createdAt` |
-| **`transactions`** | `vendorId` *(ref: `users`)*, `plan`, `amount`, `currency`, `stripeSessionId`, `stripeSubscriptionId`, `status`, `createdAt` |
+The client signs users in with Better Auth and sends a JWT with every protected request. The server verifies that token, checks the user's role and ownership of the resource, and only then reads or writes data. Nothing is trusted from the client, so roles, subscription fields and order statuses can only be changed through the rules defined here.
 
----
+**What the server handles:**
+- **Menu items:** Vendors create and manage items. Items start as `pending` and only appear publicly once an admin approves them.
+- **Orders:** Customers place and cancel orders, and vendors accept or reject them, with every business rule enforced on the server.
+- **Admin tools:** Platform statistics, user management, menu moderation and a read-only transaction log.
+- **Subscriptions:** Stripe Checkout sessions for the vendor Premium plan, activated only by verified webhook events.
 
-## API Endpoints Overview
-
-### Public Endpoints
-| Method | Endpoint | Description |
-| :--- | :--- | :--- |
-| `GET` | `/api/health` | Server health check |
-| `GET` | `/api/menu-items` | List approved & active menu items (supports search, filter & price sorting) |
-| `GET` | `/api/menu-items/featured` | Fetch featured approved & active menu items for homepage |
-| `GET` | `/api/menu-items/:id` | Fetch single menu item details |
-
-### Authenticated Customer Endpoints
-| Method | Endpoint | Description |
-| :--- | :--- | :--- |
-| `POST` | `/api/orders` | Create a new order (`pending` status, enforces duplicate & self-order checks) |
-| `GET` | `/api/orders/my-orders` | Get logged-in customer's orders |
-| `PATCH` | `/api/orders/:id/cancel` | Cancel own `pending` order |
-| `PATCH` | `/api/users/profile` | Update own editable profile fields (blocks role/subscription mutation) |
-
-### Authenticated Vendor Endpoints
-| Method | Endpoint | Description |
-| :--- | :--- | :--- |
-| `POST` | `/api/menu-items` | Submit a new menu item (enforces Free plan max 3 active items) |
-| `GET` | `/api/menu-items/vendor/me` | List all menu items owned by the authenticated vendor |
-| `PATCH` | `/api/menu-items/:id` | Update owned menu item or toggle availability |
-| `DELETE` | `/api/menu-items/:id` | Delete owned menu item |
-| `GET` | `/api/orders/vendor` | View incoming customer orders for vendor's items |
-| `PATCH` | `/api/orders/:id/status` | Accept or reject a `pending` order once |
-| `POST` | `/api/payments/create-checkout-session` | Create a Stripe Checkout Session for Vendor Premium upgrade |
-
-### Authenticated Admin Endpoints
-| Method | Endpoint | Description |
-| :--- | :--- | :--- |
-| `GET` | `/api/admin/stats` | Platform overview counts & analytics |
-| `GET` | `/api/admin/users` | List, search, and filter registered users |
-| `PATCH` | `/api/admin/users/:id/block` | Block or unblock a user |
-| `GET` | `/api/admin/menu-items` | View, search, and filter all submitted menu items |
-| `PATCH` | `/api/admin/menu-items/:id/status` | Approve, reject, or update menu item status |
-| `DELETE` | `/api/admin/menu-items/:id` | Delete inappropriate menu item |
-| `GET` | `/api/admin/transactions` | Read-only list of all vendor subscription transactions |
-
-### Webhooks
-| Method | Endpoint | Description |
-| :--- | :--- | :--- |
-| `POST` | `/api/webhooks/stripe` | Verified Stripe webhook handler (`express.raw`) for subscription activation |
+> **Note on order checkout:** Customers do not pay through Stripe when ordering a pizza. Stripe is used only for vendor Premium subscriptions.
 
 ---
 
-## Challenge Implementations
+## ✨ Features
 
-1. **Advanced Search & Price Sorting API (`GET /api/menu-items`):**
-   - Built a dynamic MongoDB query and sort pipeline supporting query parameters:
-     - `search`: Case-insensitive regex match across `itemName` (and description/category).
-     - `category`: Exact category filter (e.g., `Classic Pizzas`, `Meat Lovers`).
-     - `location`: Case-insensitive filter on restaurant city/area (`location`).
-     - `sort`: Supports `price_asc` (`{ price: 1 }`) and `price_desc` (`{ price: -1 }`), defaulting to `{ createdAt: -1 }`.
-   - Always enforces `{ status: "approved" }` on public queries so unapproved or rejected items are never exposed.
-
-2. **JWT Verification & Role-Based Middleware Flow:**
-   - Every protected route passes through a sequential middleware chain: `verifyToken` → `checkBlocked` → `requireRole(...)`.
-   - `verifyToken` extracts the `Authorization: Bearer <token>` header (or verified Better Auth session token), validates signature and expiration, attaches the decoded user (`id`, `email`, `role`) to `req.user`, and rejects invalid or expired tokens with `401 Unauthorized`.
-   - `requireRole` verifies `req.user.role` against allowed roles and rejects unauthorized access with `403 Forbidden`, while route controllers validate document ownership before any write operation.
-
-3. **Stripe Checkout & Webhook-Verified Subscriptions + Production Stability:**
-   - **Stripe Webhook Flow:** Mounted `/api/webhooks/stripe` with `express.raw({ type: "application/json" })` *before* `express.json()` so Stripe's raw payload signature can be verified via `stripe.webhooks.constructEvent(req.body, sig, process.env.STRIPE_WEBHOOK_SECRET)`. Upon `checkout.session.completed`, the server extracts `vendorId` from session metadata, inserts a record into `transactions`, and upgrades `users.subscriptionPlan` to `"premium"`.
-   - **Production Deployment:** Configured explicit CORS policies for the deployed frontend origin, centralized error-handling middleware, and proper HTTP status codes (`400`, `401`, `403`, `404`, `500`) to ensure zero CORS, `404`, or `504` issues in production.
+- **JWT Authentication:** A `verifyToken` middleware validates the token on every protected route. Invalid or expired tokens return `401`.
+- **Role-Based Access:** A `requireRole` middleware restricts routes to `customer`, `vendor` or `admin`. Insufficient role or ownership returns `403`.
+- **Menu Item Management:** Full create, read, update and delete for vendors, with ownership checks. Public routes return approved items only.
+- **Advanced Search and Price Sorting:** The public menu endpoint supports search, category and location filters, price sorting and pagination.
+- **Order Rules:**
+  - Vendors cannot order their own items, and admins cannot place orders.
+  - Only approved and active items can be ordered.
+  - A customer cannot place a duplicate active order for the same item and delivery date.
+  - Customers cancel only `pending` orders, and vendors accept or reject `pending` orders only once.
+- **Free Plan Limit:** Free vendors can have at most 3 pending or approved items, while Premium vendors are unlimited.
+- **Stripe Premium Subscription:** Checkout session creation and session status lookup, with Premium activation driven by signed webhook events.
+- **Verified Webhooks:** The webhook route reads the raw request body and verifies the Stripe signature before changing anything.
+- **Transactions Log:** Every subscription payment is stored and exposed to admins in a read-only view.
+- **Admin Moderation:** Approve, reject, deactivate or delete menu items, search and filter users, and view platform-wide statistics.
 
 ---
 
-## Technology Stack & Packages
+## 🧰 Tech Stack
 
-- **Runtime & Framework:** [Node.js](https://nodejs.org/), [Express.js](https://expressjs.com/)
-- **Database:** [MongoDB](https://www.mongodb.com/) (Official MongoDB Node.js Driver / Mongoose)
-- **Authentication & Security:** [Better Auth](https://www.better-auth.com/), `jsonwebtoken`, `cors`, `dotenv`
-- **Payments:** [Stripe Node SDK](https://www.npmjs.com/package/stripe) (`stripe`)
+| Category | Technologies |
+| --- | --- |
+| Runtime and Framework | Node.js, Express.js |
+| Language | TypeScript |
+| Database | MongoDB (native driver) |
+| Authentication | JWT verification (secret shared with the Better Auth client) |
+| Payments | Stripe Checkout, Stripe Webhooks |
+| Security | CORS with an allowed client origin |
+| Deployment | Render |
 
 ---
 
-## Environment Variables
+## 📦 Dependencies
 
-Create a `.env` file in the root of the server repository. **Never commit `.env` or secret credentials to GitHub.**
+| Package | Purpose |
+| --- | --- |
+| `express` | HTTP server and routing |
+| `mongodb` | Database driver |
+| `jsonwebtoken` | JWT verification |
+| `stripe` | Checkout sessions and webhook verification |
+| `cors` | Cross-origin requests from the client |
+| `dotenv` | Environment variables |
+| `typescript`, `tsx` | Type checking and development runner |
+
+See [`package.json`](./package.json) for the complete list.
+
+---
+
+## 🗂️ Collections
+
+| Collection | Purpose |
+| --- | --- |
+| `users` | Accounts created by Better Auth, including `role`, `subscriptionPlan` and `subscriptionExpiresAt` |
+| `menuItems` | Pizzas and other items with category, price, location, images and approval status |
+| `orders` | Customer orders with delivery details and status |
+| `transactions` | Subscription payment records created from Stripe events |
+
+---
+
+## 🛣️ API Overview
+
+| Area | Base Path | Access |
+| --- | --- | --- |
+| Health | `/api/health` | Public |
+| Menu Items | `/api/menu-items` | Public reads (approved only), vendor writes |
+| Orders | `/api/orders` | Customer and vendor, role-checked |
+| Admin | `/api/admin` | Admin only: stats, users, menu items, transactions |
+| Stripe | `/api/stripe` | Vendor: checkout and session status |
+| Stripe Webhook | `/api/stripe/webhook` | Stripe only, signature verified |
+
+### Menu query parameters
+
+```http
+GET /api/menu-items?search=margherita&category=Classic&location=Dhaka&sort=price_asc&page=1
+```
+
+`sort` accepts `price_asc` or `price_desc`.
+
+---
+
+## 🚀 Getting Started
+
+### Prerequisites
+
+- [Node.js](https://nodejs.org/) 20 or later
+- A MongoDB connection string
+- A Stripe account (test mode) and the [Stripe CLI](https://stripe.com/docs/stripe-cli) for local webhooks
+- The [PizzaHub client](https://github.com/AkramMdkhan/pizzahub-client) for the full experience
+
+### Installation
+
+```bash
+git clone https://github.com/AkramMdkhan/pizzahub-server.git
+cd pizzahub-server
+npm install
+```
+
+### Environment Variables
+
+Create a `.env` file in the project root. Never commit it to GitHub.
 
 ```env
-# Server Configuration
 PORT=5000
-NODE_ENV=production
+MONGODB_URI=your_mongodb_connection_string
+JWT_SECRET=same_secret_used_by_the_client
 CLIENT_URL=http://localhost:3000
-
-# MongoDB Connection
-MONGODB_URI=mongodb+srv://<username>:<password>@<cluster>.mongodb.net/<database>?retryWrites=true&w=majority
-
-# Better Auth & JWT Secrets
-BETTER_AUTH_SECRET=your_better_auth_secret_key
-BETTER_AUTH_URL=http://localhost:5000
-JWT_SECRET=your_jwt_signing_secret
-
-# Google OAuth
-GOOGLE_CLIENT_ID=your_google_oauth_client_id
-GOOGLE_CLIENT_SECRET=your_google_oauth_client_secret
-
-# Stripe Keys (Server-Side Only)
 STRIPE_SECRET_KEY=sk_test_your_stripe_secret_key
-STRIPE_WEBHOOK_SECRET=whsec_your_stripe_webhook_signing_secret
-STRIPE_PREMIUM_PRICE_ID=price_your_premium_subscription_price_id
+STRIPE_WEBHOOK_SECRET=whsec_your_webhook_signing_secret
+```
+
+`JWT_SECRET` must match the secret the client uses to sign tokens.
+
+### Run Locally
+
+```bash
+npm run dev
+```
+
+The API will be available at http://localhost:5000.
+
+### Test Stripe Webhooks Locally
+
+```bash
+stripe listen --events checkout.session.completed,invoice.paid,invoice.payment_failed,customer.subscription.deleted --forward-to localhost:5000/api/stripe/webhook
+```
+
+Copy the signing secret it prints into `STRIPE_WEBHOOK_SECRET`.
+
+### Production Build
+
+```bash
+npm run build
+npm start
+```
+
+---
+
+## ☁️ Deployment
+
+The server is deployed on **Render**.
+
+- Set every variable from the list above in the Render dashboard, with `CLIENT_URL` set to the live client address.
+- In the Stripe dashboard, add a webhook endpoint at `https://YOUR-RENDER-URL.onrender.com/api/stripe/webhook` for the four events above, and use its signing secret as `STRIPE_WEBHOOK_SECRET`.
+- Render's free tier may sleep after inactivity, so the first request can take a few seconds.
+
+---
+
+## 🔗 Links
+
+- **Live Client:** https://pizzahub-client-beige.vercel.app
+- **Client Repository:** https://github.com/AkramMdkhan/pizzahub-client
+- **Server Repository:** https://github.com/AkramMdkhan/pizzahub-server
+
+---
+
+## 👤 Author
+
+**Akram Mohammad Khan**, MERN Stack Developer
+
+[Portfolio](https://akram-mohammad-khan-portfolio.vercel.app) · [GitHub](https://github.com/AkramMdkhan) · [LinkedIn](https://www.linkedin.com/in/akrammdkhan)
